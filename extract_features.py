@@ -31,10 +31,37 @@ def get_cleaned_train_test(include_age: bool):
     test_features = test_imputed[base_feature_cols]
     test_labels = 1 - test_imputed["TYPE"]
 
+    train_age = train_imputed["Age"]
     test_age = test_imputed["Age"]
 
+    return train_features, train_labels, train_age, test_features, test_labels, test_age
 
-    return train_features, train_labels, test_features, test_labels, test_age
+def get_split_age_datasets(young_age: int = 40, old_age: int = 60):
+    train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(False)
+    young_mask = train_age < young_age
+    mid_mask = (train_age >= young_age) & (train_age <= old_age)
+    old_mask = train_age > old_age
+
+    young_mask_test = test_age < young_age
+    mid_mask_test = (test_age >= young_age) & (test_age <= old_age)
+    old_mask_test = test_age > old_age
+
+    return {
+        "young": {
+            "train": (train_features.loc[young_mask], train_labels.loc[young_mask]),
+            "test": (test_features.loc[young_mask_test], test_labels.loc[young_mask_test])
+        },
+        "mid": {
+            "train": (train_features.loc[mid_mask], train_labels.loc[mid_mask]),
+            "test": (test_features.loc[mid_mask_test], test_labels.loc[mid_mask_test])
+        },
+        "old": {
+            "train": (train_features.loc[old_mask], train_labels.loc[old_mask]),
+            "test": (test_features.loc[old_mask_test], test_labels.loc[old_mask_test])
+        },
+    }
+
+
 
 if __name__ == "__main__":
     get_cleaned_train_test(False)
