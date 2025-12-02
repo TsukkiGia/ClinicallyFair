@@ -5,7 +5,7 @@ import numpy as np
 from collections import namedtuple
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import accuracy_score, roc_curve, auc
+from sklearn.metrics import accuracy_score, roc_curve, auc, roc_auc_score, confusion_matrix
 np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
@@ -262,6 +262,68 @@ def plot_roc_curves(model_eval_data, title, filename):
     plt.show()
 
 
+def _metrics_from_predictions(labels, predictions, probabilities=None):
+    """Return accuracy, AUC (if available), and confusion matrix counts."""
+    labels = np.asarray(labels)
+    predictions = np.asarray(predictions)
+
+    accuracy = accuracy_score(labels, predictions)
+    tn, fp, fn, tp = confusion_matrix(labels, predictions, labels=[0, 1]).ravel()
+
+    auc_value = np.nan
+    if probabilities is not None and len(np.unique(labels)) == 2:
+        try:
+            auc_value = roc_auc_score(labels, probabilities)
+        except ValueError:
+            pass
+
+    return {
+        "Test Accuracy": accuracy,
+        "Test AUC": auc_value,
+        "FN": fn,
+        "FP": fp,
+        "TP": tp,
+        "TN": tn
+    }
+
+
+def compute_model_metrics(model, test_features, test_labels):
+    """Compute standard metrics for a single model/test set."""
+    if len(test_labels) == 0:
+        return None
+    predictions = model.predict(test_features)
+    probabilities = model.predict_proba(test_features)[:, 1]
+    return _metrics_from_predictions(test_labels, predictions, probabilities)
+
+
+def compute_decoupled_metrics(evaluation_data):
+    """Aggregate metrics across multiple personalized models evaluated on their splits."""
+    all_predictions = []
+    all_labels = []
+    all_probabilities = []
+
+    for data in evaluation_data.values():
+        test_features = data.get("test_features")
+        test_labels = data.get("test_labels")
+        model = data.get("model")
+        if test_features is None or test_labels is None or len(test_labels) == 0:
+            continue
+        preds = model.predict(test_features)
+        probs = model.predict_proba(test_features)[:, 1]
+        all_predictions.append(preds)
+        all_labels.append(test_labels)
+        all_probabilities.append(probs)
+
+    if not all_labels:
+        print("No evaluation data available for decoupled metrics.")
+        return None
+
+    predictions = np.concatenate(all_predictions)
+    labels = np.concatenate(all_labels)
+    probabilities = np.concatenate(all_probabilities)
+    return _metrics_from_predictions(labels, predictions, probabilities)
+
+
 def get_sample_sizes_by_age_group(test_age):
     """Extract sample sizes for each of the 6 age groups"""
     age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
@@ -486,7 +548,9 @@ if __name__ == "__main__":
     print("="*60)
     print("EXPERIMENT 1: MODEL WITHOUT AGE AS A FEATURE")
     print("="*60)
-    
+
+    metrics_summary = {}
+
     # Load data without age
     train_features_no_age, train_labels_no_age, train_age_no, test_features_no_age, test_labels_no_age, test_age = get_cleaned_train_test(False)
     
@@ -496,7 +560,10 @@ if __name__ == "__main__":
     # Report overall accuracy
     accuracy_no_age = model_without_age.score(test_features_no_age, test_labels_no_age)
     print(f"Overall Test Set No Age Accuracy: {accuracy_no_age:.4f}")
-    
+
+    gm_no_age_metrics = compute_model_metrics(model_without_age, test_features_no_age, test_labels_no_age)
+    metrics_summary["Generic Model - Without Age"] = gm_no_age_metrics
+
     # Get accuracies across age groups
     accuracies_without_age = calculate_accuracy_across_ages(
         model_without_age, test_features_no_age, test_labels_no_age, test_age, print_results=True
@@ -517,7 +584,11 @@ if __name__ == "__main__":
     # Report overall accuracy
     accuracy_with_age = model_with_age.score(test_features_with_age, test_labels_with_age)
     print(f"Overall Test Set With Age Accuracy: {accuracy_with_age:.4f}")
+
+    gm_with_age_metrics = compute_model_metrics(model_with_age, test_features_with_age, test_labels_with_age)
     
+    metrics_summary["Generic Model - With Age"] = gm_with_age_metrics
+
     # Get accuracies across age groups
     accuracies_with_age = calculate_accuracy_across_ages(
         model_with_age, test_features_with_age, test_labels_with_age, test_age, print_results=True
@@ -602,7 +673,20 @@ if __name__ == "__main__":
         "ROC Curves - Personalized Models (With Age)",
         "roc_personalized_with_age.png"
     )
-    
+
+    decoupled_metrics = compute_decoupled_metrics(personalized_eval_no_age)
+    metrics_summary["Decoupled Models - Without Age"] = decoupled_metrics
+
+    metrics_df = pd.DataFrame(metrics_summary)
+    desired_rows = ["Test Accuracy", "Test AUC", "FN", "FP", "TP", "TN"]
+    metrics_df = metrics_df.reindex(desired_rows)
+    print("\n" + "="*60)
+    print("MODEL METRIC SUMMARY")
+    print("="*60)
+    print(metrics_df)
+    metrics_df.to_csv('model_metrics_summary.csv')
+    print("Metric summary saved as 'model_metrics_summary.csv'")
+
     # Get sample sizes for the 6 age groups (using test_age from experiment 1/2)
     sample_sizes = get_sample_sizes_by_age_group(test_age)
     print("\n" + "-"*60)
@@ -610,4 +694,3 @@ if __name__ == "__main__":
     print("-"*60)
     for age_label, size in sample_sizes.items():
         print(f"  {age_label}: {size}")
-
