@@ -36,8 +36,8 @@ def get_cleaned_train_test(include_age: bool):
 
     return train_features, train_labels, train_age, test_features, test_labels, test_age
 
-def get_split_age_datasets(young_age: int = 40, old_age: int = 60):
-    train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(False)
+def get_split_age_datasets(young_age: int = 40, old_age: int = 50, include_age = False):
+    train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(include_age)
     young_mask = train_age < young_age
     mid_mask = (train_age >= young_age) & (train_age <= old_age)
     old_mask = train_age > old_age
