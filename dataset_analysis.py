@@ -1,5 +1,5 @@
 import pandas as pd
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
@@ -9,13 +9,15 @@ def age_histogram(df: pd.DataFrame):
     plt.xlabel("Age")
     plt.ylabel("Count")
     plt.title("Age Distribution (Histogram)")
-    plt.show()
+    plt.tight_layout()
+    plt.savefig('age_histogram.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
-def get_logreg_feature_importance(df, model):
+def get_logreg_feature_importance(columns, model, output_path):
     coefficients = model.coef_[0] 
     df = pd.DataFrame(
         {
-            "features": df.columns,
+            "feature": columns,
             "importance": coefficients
         }
     ).sort_values("importance")
@@ -25,7 +27,9 @@ def get_logreg_feature_importance(df, model):
     plt.title(f"Signed Feature Importance")
     plt.grid(axis="x", linestyle="--", alpha=0.4)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return df
 
 def plot_correlation_with_age(df, feature_col):
     data = df[[feature_col, "Age"]].dropna()
@@ -47,7 +51,9 @@ def plot_correlation_with_age(df, feature_col):
     plt.ylabel(feature_col)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    output_path = f"correlation_with_age_{feature_col}.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
 
     return corr
 
@@ -75,6 +81,7 @@ def cancer_prevalence_fixed_bins(df):
     plt.ylim(0, 1)
     plt.grid(axis="y", alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    plt.savefig('cancer_prevalence_by_age_group.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
     return out

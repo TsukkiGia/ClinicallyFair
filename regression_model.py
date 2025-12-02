@@ -2,13 +2,13 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from collections import namedtuple
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score, roc_curve, auc, roc_auc_score, confusion_matrix
 np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
+from dataset_analysis import get_logreg_feature_importance
 
 
 param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000]}
@@ -129,7 +129,7 @@ def plot_accuracy_comparison(accuracies_without_age, accuracies_with_age):
     plt.tight_layout()
     plt.savefig('accuracy_comparison_by_age.png', dpi=300, bbox_inches='tight')
     print("Plot saved as 'accuracy_comparison_by_age.png'")
-    plt.show()
+    plt.close()
 
 
 def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
@@ -196,7 +196,7 @@ def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
     plt.tight_layout()
     plt.savefig('accuracy_changes_by_age.png', dpi=300, bbox_inches='tight')
     print("Diverging plot saved as 'accuracy_changes_by_age.png'")
-    plt.show()
+    plt.close()
 
 
 def _compute_roc_metrics(model, test_features, test_labels):
@@ -259,7 +259,7 @@ def plot_roc_curves(model_eval_data, title, filename):
     plt.tight_layout()
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"ROC plot saved as '{filename}'")
-    plt.show()
+    plt.close()
 
 
 def _metrics_from_predictions(labels, predictions, probabilities=None):
@@ -341,42 +341,16 @@ def get_sample_sizes_by_age_group(test_age):
     return sample_sizes
 
 
-def combine_age_groups_to_three(accuracies_dict, sample_sizes_dict):
-    """Combine 6 age groups into 3: <40, 40-50, >50
-    Using weighted average based on sample sizes"""
-    # Map fine-grained groups to coarse groups
-    mapping = {
-        '<30': 'young',
-        '30-39': 'young',
-        '40-49': 'mid',
-        '50-59': 'old',
-        '60+': 'old'
-    }
-    
-    # Collect accuracies and sample sizes by coarse group
-    combined_accs = {'young': [], 'mid': [], 'old': []}
-    combined_sizes = {'young': [], 'mid': [], 'old': []}
-    
-    for fine_label, coarse_label in mapping.items():
-        if fine_label in accuracies_dict and fine_label in sample_sizes_dict:
-            combined_accs[coarse_label].append(accuracies_dict[fine_label])
-            combined_sizes[coarse_label].append(sample_sizes_dict[fine_label])
-    
-    # Calculate weighted average for each group
-    result = {}
-    for group in combined_accs.keys():
-        if combined_accs[group] and combined_sizes[group]:
-            accs = np.array(combined_accs[group])
-            sizes = np.array(combined_sizes[group])
-            
-            # Weighted average: sum(accuracy * size) / sum(size)
-            if sizes.sum() > 0:
-                result[group] = np.sum(accs * sizes) / sizes.sum()
-    
-    return result
+def _sanitize_label(label):
+    return (label.replace("<", "lt")
+                 .replace(">", "gt")
+                 .replace("+", "plus")
+                 .replace(" ", "_")
+                 .replace("-", "_")
+                 .lower())
 
 
-def calculate_personalized_accuracies(age_datasets, print_results=True, return_models=False):
+def calculate_personalized_accuracies(age_datasets, print_results=True, return_models=False, importance_prefix=None):
     """Train personalized models for each detailed age bin from get_split_age_datasets."""
     personalized_accuracies = {}
     evaluation_data = {}
@@ -413,11 +387,20 @@ def calculate_personalized_accuracies(age_datasets, print_results=True, return_m
         personalized_model = get_best_model(train_features_group, train_labels_group)
         personalized_acc = personalized_model.score(test_features_group, test_labels_group)
         personalized_accuracies[group_key] = personalized_acc
+
+        feature_names = train_features_group.columns.tolist()
+        if importance_prefix:
+            output_path = f"{importance_prefix}_{_sanitize_label(group_key)}.png"
+            get_logreg_feature_importance(feature_names, personalized_model, output_path)
+
         if return_models:
             evaluation_data[group_key] = {
                 "model": personalized_model,
                 "test_features": test_features_group,
-                "test_labels": test_labels_group
+                "test_labels": test_labels_group,
+                "feature_names": feature_names,
+                "coefficients": personalized_model.coef_[0],
+                "train_sample_size": train_count
             }
 
         if print_results:
@@ -471,7 +454,7 @@ def plot_personalized_accuracies(personalized_accuracies):
     plt.tight_layout()
     plt.savefig('personalized_accuracies.png', dpi=300, bbox_inches='tight')
     print("\nPersonalized accuracies plot saved as 'personalized_accuracies.png'")
-    plt.show()
+    plt.close()
 
 
 def plot_personalized_accuracies_combined_negatives(accuracies_no_age, accuracies_with_age):
@@ -540,7 +523,7 @@ def plot_personalized_accuracies_combined_negatives(accuracies_no_age, accuracie
     plt.tight_layout()
     plt.savefig('personalized_with_vs_without_age.png', dpi=300, bbox_inches='tight')
     print("\nCombined personalized plot saved as 'personalized_with_vs_without_age.png'")
-    plt.show()
+    plt.close()
 
 
 if __name__ == "__main__":
@@ -556,6 +539,11 @@ if __name__ == "__main__":
     
     # Train model
     model_without_age = get_best_model(train_features_no_age, train_labels_no_age)
+    importance_df_no_age = get_logreg_feature_importance(
+        train_features_no_age.columns,
+        model_without_age,
+        "feature_importance_general_without_age.png"
+    )
     
     # Report overall accuracy
     accuracy_no_age = model_without_age.score(test_features_no_age, test_labels_no_age)
@@ -580,6 +568,11 @@ if __name__ == "__main__":
     
     # Train model
     model_with_age = get_best_model(train_features_with_age, train_labels_with_age)
+    importance_df_with_age = get_logreg_feature_importance(
+        train_features_with_age.columns,
+        model_with_age,
+        "feature_importance_general_with_age.png"
+    )
     
     # Report overall accuracy
     accuracy_with_age = model_with_age.score(test_features_with_age, test_labels_with_age)
@@ -636,7 +629,10 @@ if __name__ == "__main__":
     
     # Train personalized models for each age group (without age)
     personalized_accuracies_no_age, personalized_eval_no_age = calculate_personalized_accuracies(
-        age_datasets_no_age, print_results=True, return_models=True
+        age_datasets_no_age,
+        print_results=True,
+        return_models=True,
+        importance_prefix="feature_importance_personalized_no_age"
     )
     
     # Get age-split datasets (WITH age as feature)
@@ -647,7 +643,10 @@ if __name__ == "__main__":
     print("TRAINING PERSONALIZED MODELS WITH AGE FEATURE")
     print("="*60)
     personalized_accuracies_with_age, personalized_eval_with_age = calculate_personalized_accuracies(
-        age_datasets_with_age, print_results=True, return_models=True
+        age_datasets_with_age,
+        print_results=True,
+        return_models=True,
+        importance_prefix="feature_importance_personalized_with_age"
     )
 
     # Plot combined personalized model accuracies (diverging plot)
