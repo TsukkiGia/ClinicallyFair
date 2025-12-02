@@ -50,3 +50,31 @@ def plot_correlation_with_age(df, feature_col):
     plt.show()
 
     return corr
+
+def cancer_prevalence_fixed_bins(df):
+    bins = [0, 30, 40, 50, 60, float("inf")]
+    labels = ["<30", "30-39", "40-49", "50-59", "60+"]
+
+    df = df.copy()
+    df["age_group"] = pd.cut(df["Age"], bins=bins, labels=labels, right=False)
+
+    out = (
+        df.groupby("age_group")["TYPE"]
+        .agg(
+            prevalence=lambda x: (x == 1).mean(),
+            count="count"
+        )
+        .reset_index()
+    )
+
+    plt.figure(figsize=(7,4))
+    plt.bar(out["age_group"], out["prevalence"], color="crimson")
+    plt.title("Cancer Prevalence by Age Group")
+    plt.xlabel("Age Group")
+    plt.ylabel("Cancer Prevalence (Proportion)")
+    plt.ylim(0, 1)
+    plt.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    return out

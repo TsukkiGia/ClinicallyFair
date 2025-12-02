@@ -36,31 +36,22 @@ def get_cleaned_train_test(include_age: bool):
 
     return train_features, train_labels, train_age, test_features, test_labels, test_age
 
-def get_split_age_datasets(young_age: int = 40, old_age: int = 50, include_age = False):
-    train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(include_age)
-    young_mask = train_age < young_age
-    mid_mask = (train_age >= young_age) & (train_age <= old_age)
-    old_mask = train_age > old_age
-
-    young_mask_test = test_age < young_age
-    mid_mask_test = (test_age >= young_age) & (test_age <= old_age)
-    old_mask_test = test_age > old_age
-
-    return {
-        "young": {
-            "train": (train_features.loc[young_mask], train_labels.loc[young_mask]),
-            "test": (test_features.loc[young_mask_test], test_labels.loc[young_mask_test])
-        },
-        "mid": {
-            "train": (train_features.loc[mid_mask], train_labels.loc[mid_mask]),
-            "test": (test_features.loc[mid_mask_test], test_labels.loc[mid_mask_test])
-        },
-        "old": {
-            "train": (train_features.loc[old_mask], train_labels.loc[old_mask]),
-            "test": (test_features.loc[old_mask_test], test_labels.loc[old_mask_test])
-        },
-    }
-
+def get_split_age_datasets():
+    train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(False)
+    dataset = {}
+    bins = [0, 30, 40, 50, 60, float('inf')]
+    labels = ['<30', '30-39', '40-49', '50-59', '60+']
+    train_bins = pd.cut(train_age, bins, False, labels)
+    test_bins = pd.cut(test_age, bins, False, labels)
+    for label in labels:
+        train_mask = train_bins == label
+        test_mask = test_bins == label
+        data = {
+            'train': (train_features.loc[train_mask], train_labels.loc[train_mask]),
+            'test': (test_features.loc[test_mask], test_labels.loc[test_mask])
+        }
+        dataset[label] = data
+    return dataset
 
 
 if __name__ == "__main__":
