@@ -13,7 +13,7 @@ from dataset_analysis import (
     plot_feature_importance_heatmap,
     plot_model_metrics_by_age,
 )
-from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison
+from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison, plot_accuracy_comparison_general_personalised
 
 
 param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000]}
@@ -439,6 +439,9 @@ if __name__ == "__main__":
 
     # Plot combined personalized model accuracies (diverging plot)
     plot_personalized_accuracies_combined_negatives(personalized_accuracies_no_age, personalized_accuracies_with_age)
+
+    # Plot comparison of general vs personalized models
+    plot_accuracy_comparison_general_personalised(accuracies_without_age, accuracies_with_age, personalized_accuracies_no_age)
 
     # Plot ROC curves for personalized models (without and with age)
     personalized_eval_entries_no_age = [
