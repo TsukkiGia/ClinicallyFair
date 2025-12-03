@@ -8,7 +8,7 @@ from sklearn.metrics import accuracy_score, roc_curve, auc, roc_auc_score, confu
 np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
-from dataset_analysis import get_logreg_feature_importance
+from dataset_analysis import get_logreg_feature_importance, plot_feature_importance_heatmap
 from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison
 
 
@@ -441,6 +441,18 @@ if __name__ == "__main__":
 
     decoupled_metrics = compute_decoupled_metrics(personalized_eval_no_age)
     metrics_summary["Decoupled Models - Without Age"] = decoupled_metrics
+
+    importance_heatmap_data = {
+        "Generic - Without Age": importance_df_no_age.set_index("feature")["importance"],
+        "Generic - With Age": importance_df_with_age.set_index("feature")["importance"],
+    }
+
+    for label, data in personalized_eval_no_age.items():
+        feature_names = data.get("feature_names")
+        coefficients = data.get("coefficients")
+        importance_heatmap_data[f"Decoupled - {label}"] = pd.Series(coefficients, index=feature_names)
+
+    plot_feature_importance_heatmap(importance_heatmap_data, "feature_importance_heatmap.png")
 
     metrics_df = pd.DataFrame(metrics_summary)
     desired_rows = ["Test Accuracy", "Test AUC", "FN", "FP", "TP", "TN"]

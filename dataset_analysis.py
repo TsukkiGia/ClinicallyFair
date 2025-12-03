@@ -31,31 +31,38 @@ def get_logreg_feature_importance(columns, model, output_path):
     plt.close()
     return df
 
-def plot_correlation_with_age(df, feature_col):
-    data = df[[feature_col, "Age"]].dropna()
+def plot_feature_importance_heatmap(model_importances, output_path):
+    """Plot heatmap of signed logistic regression coefficients across models."""
 
-    corr = data[feature_col].corr(data["Age"], method="pearson")
+    importance_series = {}
+    for model_name, importance in model_importances.items():
+        if isinstance(importance, pd.DataFrame):
+            series = importance.set_index("feature")["importance"]
+        elif isinstance(importance, pd.Series):
+            series = importance
+        else:
+            series = pd.Series(importance)
+        importance_series[model_name] = series
 
-    # Plot
-    plt.figure(figsize=(7,5))
-    sns.regplot(
-        x="Age", 
-        y=feature_col, 
-        data=data, 
-        scatter_kws={"alpha": 0.5}, 
-        line_kws={"color": "red"}
+    combined_df = pd.DataFrame(importance_series).fillna(0)
+    order = combined_df.abs().max(axis=1).sort_values(ascending=False).index
+    combined_df = combined_df.loc[order]
+
+    plt.figure(figsize=(12, max(6, len(combined_df) * 0.35)))
+    sns.heatmap(
+        combined_df,
+        cmap="RdBu_r",
+        center=0,
+        linewidths=0.5,
+        linecolor="white",
+        cbar_kws={"label": "Coefficient"}
     )
-    
-    plt.title(f"Correlation Between Age and {feature_col}\nPearson r = {corr}")
-    plt.xlabel("Age")
-    plt.ylabel(feature_col)
-    plt.grid(alpha=0.3)
+    plt.title("Feature Importance Heatmap (Signed Logistic Coefficients)")
+    plt.xlabel("Model")
+    plt.ylabel("Feature")
     plt.tight_layout()
-    output_path = f"correlation_with_age_{feature_col}.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
-
-    return corr
 
 def cancer_prevalence_fixed_bins(df):
     bins = [0, 30, 40, 50, 60, float("inf")]
