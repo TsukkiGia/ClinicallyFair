@@ -1,8 +1,10 @@
 import pandas as pd
 
-def get_cleaned_train_test(include_age: bool):
-    train_df = pd.read_excel('train.xlsx')
-    test_df = pd.read_excel('test.xlsx')
+
+def load_and_clean_dataset(include_age: bool):
+    """Load Excel data, clean features, and return train/test splits with ages."""
+    train_df = pd.read_excel("train.xlsx")
+    test_df = pd.read_excel("test.xlsx")
 
     # Clean string columns that have ">"
     num_str_cols = ["AFP", "CA125", "CA19-9"]
@@ -36,13 +38,24 @@ def get_cleaned_train_test(include_age: bool):
 
     return train_features, train_labels, train_age, test_features, test_labels, test_age
 
-def get_split_age_datasets(include_age: bool):
-    train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(include_age)
+
+def make_age_stratified_splits(include_age: bool):
+    """Build per-age-group train/test subsets from the cleaned dataset."""
+    (
+        train_features,
+        train_labels,
+        train_age,
+        test_features,
+        test_labels,
+        test_age,
+    ) = load_and_clean_dataset(include_age)
+
     dataset = {}
     bins = [0, 30, 40, 50, 60, float('inf')]
     labels = ['<30', '30-39', '40-49', '50-59', '60+']
     train_bins = pd.cut(train_age, bins, False, labels)
     test_bins = pd.cut(test_age, bins, False, labels)
+
     for label in labels:
         train_mask = train_bins == label
         test_mask = test_bins == label
@@ -51,8 +64,14 @@ def get_split_age_datasets(include_age: bool):
             'test': (test_features.loc[test_mask], test_labels.loc[test_mask])
         }
         dataset[label] = data
+
     return dataset
 
 
+# Backwards-compatible aliases
+get_cleaned_train_test = load_and_clean_dataset
+get_split_age_datasets = make_age_stratified_splits
+
+
 if __name__ == "__main__":
-    get_cleaned_train_test(False)
+    load_and_clean_dataset(False)

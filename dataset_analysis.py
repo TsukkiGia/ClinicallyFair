@@ -2,18 +2,30 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import os
+
+FIGURE_DIR = "figures"
+
+
+def figure_path(filename: str) -> str:
+    """Return the full path for a figure stored in the shared directory."""
+    os.makedirs(FIGURE_DIR, exist_ok=True)
+    return os.path.join(FIGURE_DIR, filename)
+
 
 def age_histogram(df: pd.DataFrame):
+    """Plot and save a histogram of patient ages."""
     plt.figure(figsize=(8,5))
     plt.hist(df, bins=20)
     plt.xlabel("Age")
     plt.ylabel("Count")
     plt.title("Age Distribution (Histogram)")
     plt.tight_layout()
-    plt.savefig('age_histogram.png', dpi=300, bbox_inches='tight')
+    plt.savefig(figure_path('age_histogram.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
 def get_logreg_feature_importance(columns, model, output_path):
+    """Compute and plot signed logistic regression coefficients for each feature."""
     coefficients = model.coef_[0] 
     df = pd.DataFrame(
         {
@@ -32,7 +44,7 @@ def get_logreg_feature_importance(columns, model, output_path):
     return df
 
 def plot_feature_importance_heatmap(model_importances, output_path):
-    """Plot heatmap of signed logistic regression coefficients across models."""
+    """Plot a heatmap of signed logistic regression coefficients across models."""
 
     importance_series = {}
     for model_name, importance in model_importances.items():
@@ -66,7 +78,7 @@ def plot_feature_importance_heatmap(model_importances, output_path):
 
 
 def plot_model_metrics_by_age(model_metric_data, metrics, age_groups, output_path, focus_groups=None, title="Model Metrics by Age Group"):
-    """Render a tabular view of metrics by age group for each model."""
+    """Render a model × (metric, age-group) table and save as an image."""
 
     if not model_metric_data:
         print("No model metric data provided for table plot.")
@@ -137,6 +149,7 @@ def plot_model_metrics_by_age(model_metric_data, metrics, age_groups, output_pat
     plt.close()
 
 def cancer_prevalence_fixed_bins(df):
+    """Compute and plot cancer prevalence in fixed age bins."""
     bins = [0, 30, 40, 50, 60, float("inf")]
     labels = ["<30", "30-39", "40-49", "50-59", "60+"]
 
@@ -160,7 +173,7 @@ def cancer_prevalence_fixed_bins(df):
     plt.ylim(0, 1)
     plt.grid(axis="y", alpha=0.3)
     plt.tight_layout()
-    plt.savefig('cancer_prevalence_by_age_group.png', dpi=300, bbox_inches='tight')
+    plt.savefig(figure_path('cancer_prevalence_by_age_group.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
     return out

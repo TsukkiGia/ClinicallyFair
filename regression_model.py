@@ -2,6 +2,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import os
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score, roc_curve, auc, roc_auc_score, confusion_matrix
@@ -21,13 +22,23 @@ logistic_model = LogisticRegression(max_iter = 250, C = 1/10, warm_start = True)
 AGE_LABELS = ['<30', '30-39', '40-49', '50-59', '60+']
 AGE_BINS = [0, 30, 40, 50, 60, float('inf')]
 METRIC_ORDER = ["Test Accuracy", "Test AUC", "FP", "TP", "TN"]
+FIGURE_DIR = "figures"
+
+
+def figure_path(filename: str) -> str:
+    """Return the full path for a figure stored in the shared directory."""
+    os.makedirs(FIGURE_DIR, exist_ok=True)
+    return os.path.join(FIGURE_DIR, filename)
+
 
 def get_basic_model(train_features, train_labels):
+    """Fit a single logistic regression model with default hyperparameters."""
     best_model = logistic_model.fit(train_features, train_labels)
     return best_model
 
+
 def get_best_model(train_features, train_labels):
-    """Searches for the best regularisation metric to use"""
+    """Run grid search to select the best-regularized logistic regression model."""
     logistic_model = LogisticRegression(max_iter=250, C=1/10, warm_start=True)
     
     grid_search = GridSearchCV(
@@ -44,7 +55,9 @@ def get_best_model(train_features, train_labels):
     best_model = grid_search.best_estimator_
     return best_model
 
+
 def _sanitize_label(label):
+    """Convert an age-group label into a filesystem-safe string."""
     return (label.replace("<", "lt")
                  .replace(">", "gt")
                  .replace("+", "plus")
@@ -52,8 +65,9 @@ def _sanitize_label(label):
                  .replace("-", "_")
                  .lower())
 
+
 def calculate_personalized_accuracies(age_datasets, print_results=True, return_models=False, importance_prefix=None):
-    """Train personalized models for each detailed age bin from get_split_age_datasets."""
+    """Train per-age-group models and return their test accuracies (and models if requested)."""
     personalized_accuracies = {}
     evaluation_data = {}
 
@@ -92,7 +106,7 @@ def calculate_personalized_accuracies(age_datasets, print_results=True, return_m
 
         feature_names = train_features_group.columns.tolist()
         if importance_prefix:
-            output_path = f"{importance_prefix}_{_sanitize_label(group_key)}.png"
+            output_path = figure_path(f"{importance_prefix}_{_sanitize_label(group_key)}.png")
             get_logreg_feature_importance(feature_names, personalized_model, output_path)
 
         if return_models:
@@ -114,7 +128,7 @@ def calculate_personalized_accuracies(age_datasets, print_results=True, return_m
 
 
 def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, print_results=True):
-    """Calculate and optionally display accuracy for each age bracket for the general model"""
+    """Compute test accuracy for each predefined age bin for a general model."""
     # Create age groups
     test_age_groups = pd.cut(test_age, bins=AGE_BINS, labels=AGE_LABELS, right=False)
     
@@ -154,7 +168,7 @@ def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, 
     return accuracies
 
 def _compute_roc_metrics(model, test_features, test_labels):
-    """Compute ROC curve metrics if both classes are present."""
+    """Compute ROC curve points and AUC for a model if both classes are present."""
     unique_classes = np.unique(test_labels)
     if len(unique_classes) < 2:
         print("Skipping ROC curve - only one class present in labels.")
@@ -167,7 +181,7 @@ def _compute_roc_metrics(model, test_features, test_labels):
 
 
 def plot_roc_curves(model_eval_data, title, filename):
-    """Plot ROC curves for one or more models."""
+    """Plot ROC curves for one or more evaluated models and save to disk."""
     if not model_eval_data:
         print("No model evaluation data provided for ROC plot.")
         return
@@ -217,7 +231,7 @@ def plot_roc_curves(model_eval_data, title, filename):
 
 
 def compute_metrics_by_age(model, test_features, test_labels, test_age):
-    """Return nested metric dict: metric -> age_group -> value."""
+    """Compute accuracy/AUC/confusion counts per age bin for a given model."""
     if len(test_labels) == 0:
         return {}
 
@@ -241,6 +255,7 @@ def compute_metrics_by_age(model, test_features, test_labels, test_age):
 
 
 def build_single_group_metric_dict(stats, age_label):
+    """Create metric dict where only one age group has non-empty entries."""
     result = {metric: {} for metric in METRIC_ORDER}
     if not stats:
         return result
@@ -275,7 +290,7 @@ def _metrics_from_predictions(labels, predictions, probabilities=None):
 
 
 def compute_model_metrics(model, test_features, test_labels):
-    """Compute standard metrics for a single model/test set."""
+    """Compute overall test accuracy, AUC, and confusion counts for a model."""
     if len(test_labels) == 0:
         return None
     predictions = model.predict(test_features)
@@ -312,7 +327,7 @@ def compute_decoupled_metrics(evaluation_data):
 
 
 def get_sample_sizes_by_age_group(test_age):
-    """Extract sample sizes for each of the 6 age groups"""
+    """Extract sample sizes for each of the fixed age groups."""
     age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
     age_bins = [0, 30, 40, 50, 60, float('inf')]
     
@@ -344,7 +359,7 @@ if __name__ == "__main__":
     importance_df_no_age = get_logreg_feature_importance(
         train_features_no_age.columns,
         model_without_age,
-        "feature_importance_general_without_age.png"
+        figure_path("feature_importance_general_without_age.png"),
     )
     
     # Report model metrics
@@ -370,7 +385,7 @@ if __name__ == "__main__":
     importance_df_with_age = get_logreg_feature_importance(
         train_features_with_age.columns,
         model_with_age,
-        "feature_importance_general_with_age.png"
+        figure_path("feature_importance_general_with_age.png"),
     )
     
     # Report model metrics
@@ -407,7 +422,11 @@ if __name__ == "__main__":
             "test_labels": test_labels_with_age
         }
     ]
-    plot_roc_curves(general_model_eval, "ROC Curves - General Models", "roc_general_models.png")
+    plot_roc_curves(
+        general_model_eval,
+        "ROC Curves - General Models",
+        figure_path("roc_general_models.png"),
+    )
     
     
     # ==================== EXPERIMENT 3: PERSONALIZED MODELS BY AGE ====================
@@ -451,7 +470,7 @@ if __name__ == "__main__":
     plot_roc_curves(
         personalized_eval_entries_no_age,
         "ROC Curves - Personalized Models (No Age)",
-        "roc_personalized_no_age.png"
+        figure_path("roc_personalized_no_age.png"),
     )
 
     personalized_eval_entries_with_age = [
@@ -461,7 +480,7 @@ if __name__ == "__main__":
     plot_roc_curves(
         personalized_eval_entries_with_age,
         "ROC Curves - Personalized Models (With Age)",
-        "roc_personalized_with_age.png"
+        figure_path("roc_personalized_with_age.png"),
     )
 
     focus_groups = {
@@ -495,7 +514,10 @@ if __name__ == "__main__":
         coefficients = data.get("coefficients")
         importance_heatmap_data[f"Decoupled - {label}"] = pd.Series(coefficients, index=feature_names)
 
-    plot_feature_importance_heatmap(importance_heatmap_data, "feature_importance_heatmap.png")
+    plot_feature_importance_heatmap(
+        importance_heatmap_data,
+        figure_path("feature_importance_heatmap.png"),
+    )
 
     metrics_df = pd.DataFrame(metrics_summary)
     desired_rows = ["Test Accuracy", "Test AUC", "FP", "TP", "TN"]
@@ -514,7 +536,7 @@ if __name__ == "__main__":
         model_metric_data,
         ["Test Accuracy"],
         age_groups,
-        "model_metrics_accuracy_by_age.png",
+        figure_path("model_metrics_accuracy_by_age.png"),
         focus_groups=focus_groups,
         title="Model Accuracy by Age Group",
     )
@@ -524,7 +546,7 @@ if __name__ == "__main__":
         model_metric_data,
         ["Test AUC"],
         age_groups,
-        "model_metrics_auc_by_age.png",
+        figure_path("model_metrics_auc_by_age.png"),
         focus_groups=focus_groups,
         title="Model AUC by Age Group",
     )
@@ -534,7 +556,7 @@ if __name__ == "__main__":
         model_metric_data,
         ["FP"],
         age_groups,
-        "model_metrics_fp_by_age.png",
+        figure_path("model_metrics_fp_by_age.png"),
         focus_groups=focus_groups,
         title="Model FP Counts by Age Group",
     )
@@ -543,7 +565,7 @@ if __name__ == "__main__":
         model_metric_data,
         ["TP"],
         age_groups,
-        "model_metrics_tp_by_age.png",
+        figure_path("model_metrics_tp_by_age.png"),
         focus_groups=focus_groups,
         title="Model TP Counts by Age Group",
     )
@@ -552,7 +574,7 @@ if __name__ == "__main__":
         model_metric_data,
         ["TN"],
         age_groups,
-        "model_metrics_tn_by_age.png",
+        figure_path("model_metrics_tn_by_age.png"),
         focus_groups=focus_groups,
         title="Model TN Counts by Age Group",
     )

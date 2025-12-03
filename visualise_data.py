@@ -2,8 +2,17 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import seaborn as sns
+import os
 from matplotlib.patches import Patch
 from extract_features import get_cleaned_train_test
+
+FIGURE_DIR = "figures"
+
+
+def figure_path(filename: str) -> str:
+    """Return the full path for a figure stored in the shared directory."""
+    os.makedirs(FIGURE_DIR, exist_ok=True)
+    return os.path.join(FIGURE_DIR, filename)
 
 # Get features with age included
 train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(True)
@@ -11,6 +20,7 @@ train_features, train_labels, train_age, test_features, test_labels, test_age = 
 
 
 def plot_cancer_age_distribution():
+    """Visualize cancer vs no-cancer counts across age groups in the training data."""
     # Combine features and labels into a single DataFrame
     train_data = train_features.copy()
     train_data['cancer'] = train_labels
@@ -30,15 +40,14 @@ def plot_cancer_age_distribution():
     plt.ylabel('Count')
     plt.legend(labels=['No Cancer', 'Cancer'])
     plt.tight_layout()
-    plt.savefig('age_distribution_by_cancer.png', dpi=300, bbox_inches='tight')
+    plt.savefig(figure_path('age_distribution_by_cancer.png'), dpi=300, bbox_inches='tight')
 
     print(f"\nDataset shape: {train_data.shape}")
     print(f"\nCancer distribution:\n{train_data['cancer'].value_counts()}")
     print(f"\nAge group distribution:\n{train_data['age_group'].value_counts().sort_index()}")
 
 def plot_personalized_accuracies_combined_negatives(accuracies_no_age, accuracies_with_age):
-    """Plot diverging bar chart comparing personalized models with and without age feature.
-    Shows difference on positive/negative scale."""
+    """Plot a diverging chart of accuracy changes when age is added to personalized models."""
 
     if not accuracies_no_age or not accuracies_with_age:
         print("Insufficient personalized accuracy data to compare.")
@@ -100,13 +109,13 @@ def plot_personalized_accuracies_combined_negatives(accuracies_no_age, accuracie
     ax.legend(handles=legend_elements, loc='best', fontsize=10)
 
     plt.tight_layout()
-    plt.savefig('personalized_with_vs_without_age.png', dpi=300, bbox_inches='tight')
-    print("\nCombined personalized plot saved as 'personalized_with_vs_without_age.png'")
+    plt.savefig(figure_path('personalized_with_vs_without_age.png'), dpi=300, bbox_inches='tight')
+    print("\nCombined personalized plot saved as 'figures/personalized_with_vs_without_age.png'")
     plt.close()
 
 
 def plot_accuracy_comparison(accuracies_without_age, accuracies_with_age):
-    """Plot comparison of accuracies across age groups for general models with age and without age"""
+    """Compare accuracy by age group for general models with and without age."""
     age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
     
     # Extract accuracies for plotting (only for age groups that exist in both)
@@ -150,17 +159,13 @@ def plot_accuracy_comparison(accuracies_without_age, accuracies_with_age):
                    ha='center', va='bottom', fontsize=9)
     
     plt.tight_layout()
-    plt.savefig('general_models_accuracy_comparison_by_age.png', dpi=300, bbox_inches='tight')
-    print("Plot saved as 'accuracy_comparison_by_age.png'")
+    plt.savefig(figure_path('general_models_accuracy_comparison_by_age.png'), dpi=300, bbox_inches='tight')
+    print("Plot saved as 'figures/general_models_accuracy_comparison_by_age.png'")
     plt.close()
 
 
 def plot_accuracy_comparison_general_personalised(general_accuracies_without_age, general_accuracies_with_age, personalized_accuracies_no_age):
-    """Plot comparison of accuracies across age groups for:
-    - General model without age
-    - General model with age  
-    - Personalized models without age
-    """
+    """Compare accuracies of general vs personalized models across age groups."""
     age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
     
     # Extract accuracies for plotting (only for age groups that exist in all three)
@@ -210,14 +215,13 @@ def plot_accuracy_comparison_general_personalised(general_accuracies_without_age
                    ha='center', va='bottom', fontsize=8)
     
     plt.tight_layout()
-    plt.savefig('general_vs_personalized_accuracy_comparison.png', dpi=300, bbox_inches='tight')
-    print("Plot saved as 'general_vs_personalized_accuracy_comparison.png'")
+    plt.savefig(figure_path('general_vs_personalized_accuracy_comparison.png'), dpi=300, bbox_inches='tight')
+    print("Plot saved as 'figures/general_vs_personalized_accuracy_comparison.png'")
     plt.close()
 
 
 def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
-    """Plot diverging bar chart showing accuracy changes when age is included.
-    Positive changes (improvements) go right, negative changes (decreases) go left."""
+    """Show how including age changes general-model accuracy by age group on a diverging scale."""
     
     age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
     
@@ -276,8 +280,8 @@ def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
     ax.legend(handles=legend_elements, loc='best')
     
     plt.tight_layout()
-    plt.savefig('accuracy_changes_by_age.png', dpi=300, bbox_inches='tight')
-    print("Diverging plot saved as 'accuracy_changes_by_age.png'")
+    plt.savefig(figure_path('accuracy_changes_by_age.png'), dpi=300, bbox_inches='tight')
+    print("Diverging plot saved as 'figures/accuracy_changes_by_age.png'")
     plt.close()
 
 
