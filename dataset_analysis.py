@@ -64,6 +64,78 @@ def plot_feature_importance_heatmap(model_importances, output_path):
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
+
+def plot_model_metrics_by_age(model_metric_data, metrics, age_groups, output_path, focus_groups=None, title="Model Metrics by Age Group"):
+    """Render a tabular view of metrics by age group for each model."""
+
+    if not model_metric_data:
+        print("No model metric data provided for table plot.")
+        return
+
+    focus_groups = focus_groups or {}
+    model_names = list(model_metric_data.keys())
+
+    # Build data matrix and mask
+    data_matrix = []
+    mask_matrix = []
+    for model in model_names:
+        metric_entry = model_metric_data.get(model, {})
+        allowed_groups = focus_groups.get(model)
+        row_values = []
+        mask_row = []
+        for metric in metrics:
+            metric_values = metric_entry.get(metric, {})
+            for age_group in age_groups:
+                value = metric_values.get(age_group)
+                if allowed_groups is not None and age_group not in allowed_groups:
+                    row_values.append(np.nan)
+                    mask_row.append(True)
+                else:
+                    row_values.append(value)
+                    is_missing = value is None or (isinstance(value, float) and np.isnan(value))
+                    mask_row.append(is_missing)
+        data_matrix.append(row_values)
+        mask_matrix.append(mask_row)
+
+    col_labels = ["Model"] + [f"{metric}\n{age}" for metric in metrics for age in age_groups]
+    cell_text = []
+    for model, row in zip(model_names, data_matrix):
+        formatted = [model]
+        for value in row:
+            if value is None or (isinstance(value, float) and np.isnan(value)):
+                formatted.append("-")
+            else:
+                formatted.append(f"{value:.3f}")
+        cell_text.append(formatted)
+
+    fig_height = max(4, len(model_names) * 0.6)
+    fig, ax = plt.subplots(figsize=(max(8, len(col_labels) * 1.2), fig_height))
+    ax.axis('off')
+
+    table = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        cellLoc='center',
+        loc='center'
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.4)
+
+    for i in range(len(model_names)):
+        for j in range(1, len(col_labels)):
+            cell = table[(i + 1, j)]
+            if mask_matrix[i][j - 1]:
+                cell.set_facecolor('lightgray')
+            else:
+                cell.set_facecolor('white')
+
+    plt.title(title, fontsize=12, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Model metrics table saved as '{output_path}'")
+    plt.close()
+
 def cancer_prevalence_fixed_bins(df):
     bins = [0, 30, 40, 50, 60, float("inf")]
     labels = ["<30", "30-39", "40-49", "50-59", "60+"]

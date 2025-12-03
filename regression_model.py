@@ -8,12 +8,19 @@ from sklearn.metrics import accuracy_score, roc_curve, auc, roc_auc_score, confu
 np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
-from dataset_analysis import get_logreg_feature_importance, plot_feature_importance_heatmap
+from dataset_analysis import (
+    get_logreg_feature_importance,
+    plot_feature_importance_heatmap,
+    plot_model_metrics_by_age,
+)
 from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison
 
 
 param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000]}
 logistic_model = LogisticRegression(max_iter = 250, C = 1/10, warm_start = True)
+AGE_LABELS = ['<30', '30-39', '40-49', '50-59', '60+']
+AGE_BINS = [0, 30, 40, 50, 60, float('inf')]
+METRIC_ORDER = ["Test Accuracy", "Test AUC", "FP", "TP", "TN"]
 
 def get_basic_model(train_features, train_labels):
     best_model = logistic_model.fit(train_features, train_labels)
@@ -108,12 +115,8 @@ def calculate_personalized_accuracies(age_datasets, print_results=True, return_m
 
 def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, print_results=True):
     """Calculate and optionally display accuracy for each age bracket for the general model"""
-    # Define age brackets
-    age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
-    age_bins = [0, 30, 40, 50, 60, float('inf')]
-    
     # Create age groups
-    test_age_groups = pd.cut(test_age, bins=age_bins, labels=age_labels, right=False)
+    test_age_groups = pd.cut(test_age, bins=AGE_BINS, labels=AGE_LABELS, right=False)
     
     # Get predictions for all test data
     predictions = model.predict(test_features)
@@ -125,7 +128,7 @@ def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, 
         print("="*50)
     
     accuracies = {}
-    for age_label in age_labels:
+    for age_label in AGE_LABELS:
         # Get indices for this age group
         age_mask = test_age_groups == age_label
         
@@ -213,6 +216,39 @@ def plot_roc_curves(model_eval_data, title, filename):
     plt.close()
 
 
+def compute_metrics_by_age(model, test_features, test_labels, test_age):
+    """Return nested metric dict: metric -> age_group -> value."""
+    if len(test_labels) == 0:
+        return {}
+
+    test_age_groups = pd.cut(test_age, bins=AGE_BINS, labels=AGE_LABELS, right=False)
+    predictions = model.predict(test_features)
+    probabilities = model.predict_proba(test_features)[:, 1]
+
+    metrics_by_age = {metric: {} for metric in METRIC_ORDER}
+
+    for age_label in AGE_LABELS:
+        mask = test_age_groups == age_label
+        if mask.sum() == 0:
+            continue
+        stats = _metrics_from_predictions(
+            test_labels[mask], predictions[mask], probabilities[mask]
+        )
+        for metric_name in METRIC_ORDER:
+            metrics_by_age[metric_name][age_label] = stats.get(metric_name)
+
+    return metrics_by_age
+
+
+def build_single_group_metric_dict(stats, age_label):
+    result = {metric: {} for metric in METRIC_ORDER}
+    if not stats:
+        return result
+    for metric in METRIC_ORDER:
+        result[metric][age_label] = stats.get(metric)
+    return result
+
+
 def _metrics_from_predictions(labels, predictions, probabilities=None):
     """Return accuracy, AUC (if available), and confusion matrix counts."""
     labels = np.asarray(labels)
@@ -238,7 +274,7 @@ def _metrics_from_predictions(labels, predictions, probabilities=None):
     }
 
 
-def compute_general_model_metrics(model, test_features, test_labels):
+def compute_model_metrics(model, test_features, test_labels):
     """Compute standard metrics for a single model/test set."""
     if len(test_labels) == 0:
         return None
@@ -294,43 +330,40 @@ def get_sample_sizes_by_age_group(test_age):
 
 if __name__ == "__main__":
     # ==================== EXPERIMENT 1: WITHOUT AGE ====================
-    print("="*60)
-    print("EXPERIMENT 1: MODEL WITHOUT AGE AS A FEATURE")
-    print("="*60)
 
     metrics_summary = {}
+    model_metric_data = {}
 
     # Load data without age
-    train_features_no_age, train_labels_no_age, train_age_no, test_features_no_age, test_labels_no_age, test_age = get_cleaned_train_test(False)
+    train_features_no_age, train_labels_no_age, train_age_no, test_features_no_age, test_labels_no_age, test_age_no = get_cleaned_train_test(False)
     
     # Train model
     model_without_age = get_best_model(train_features_no_age, train_labels_no_age)
+
+    # Get feature importance
     importance_df_no_age = get_logreg_feature_importance(
         train_features_no_age.columns,
         model_without_age,
         "feature_importance_general_without_age.png"
     )
     
-    # Report overall accuracy
-    accuracy_no_age = model_without_age.score(test_features_no_age, test_labels_no_age)
-    print(f"Overall Test Set No Age Accuracy: {accuracy_no_age:.4f}")
-
-    gm_no_age_metrics = compute_general_model_metrics(model_without_age, test_features_no_age, test_labels_no_age)
+    # Report model metrics
+    gm_no_age_metrics = compute_model_metrics(model_without_age, test_features_no_age, test_labels_no_age)
     metrics_summary["Generic Model - Without Age"] = gm_no_age_metrics
 
     # Get accuracies across age groups
     accuracies_without_age = calculate_accuracy_across_ages(
-        model_without_age, test_features_no_age, test_labels_no_age, test_age, print_results=True
+        model_without_age, test_features_no_age, test_labels_no_age, test_age_no, print_results=True
+    )
+    model_metric_data["Generic - Without Age"] = compute_metrics_by_age(
+        model_without_age, test_features_no_age, test_labels_no_age, test_age_no
     )
     
     
     # ==================== EXPERIMENT 2: WITH AGE ====================
-    print("\n" + "="*60)
-    print("EXPERIMENT 2: MODEL WITH AGE AS A FEATURE")
-    print("="*60)
     
     # Load data with age
-    train_features_with_age, train_labels_with_age, train_age_with, test_features_with_age, test_labels_with_age, test_age = get_cleaned_train_test(True)
+    train_features_with_age, train_labels_with_age, train_age_with, test_features_with_age, test_labels_with_age, test_age_with = get_cleaned_train_test(True)
     
     # Train model
     model_with_age = get_best_model(train_features_with_age, train_labels_with_age)
@@ -340,28 +373,20 @@ if __name__ == "__main__":
         "feature_importance_general_with_age.png"
     )
     
-    # Report overall accuracy
-    accuracy_with_age = model_with_age.score(test_features_with_age, test_labels_with_age)
-    print(f"Overall Test Set With Age Accuracy: {accuracy_with_age:.4f}")
-
-    gm_with_age_metrics = compute_general_model_metrics(model_with_age, test_features_with_age, test_labels_with_age)
-    
+    # Report model metrics
+    gm_with_age_metrics = compute_model_metrics(model_with_age, test_features_with_age, test_labels_with_age)
     metrics_summary["Generic Model - With Age"] = gm_with_age_metrics
 
     # Get accuracies across age groups
     accuracies_with_age = calculate_accuracy_across_ages(
-        model_with_age, test_features_with_age, test_labels_with_age, test_age, print_results=True
+        model_with_age, test_features_with_age, test_labels_with_age, test_age_with, print_results=True
+    )
+    model_metric_data["Generic - With Age"] = compute_metrics_by_age(
+        model_with_age, test_features_with_age, test_labels_with_age, test_age_with
     )
     
     
     # ==================== COMPARISON ====================
-    print("\n" + "="*60)
-    print("COMPARISON SUMMARY")
-    print("="*60)
-    print(f"Overall Accuracy WITHOUT Age: {accuracy_no_age:.4f}")
-    print(f"Overall Accuracy WITH Age:    {accuracy_with_age:.4f}")
-    print(f"Difference (With - Without):  {accuracy_with_age - accuracy_no_age:+.4f}")
-    print("="*60 + "\n")
     
     # Plot comparison
     plot_accuracy_comparison(accuracies_without_age, accuracies_with_age)
@@ -386,9 +411,6 @@ if __name__ == "__main__":
     
     
     # ==================== EXPERIMENT 3: PERSONALIZED MODELS BY AGE ====================
-    print("\n" + "="*60)
-    print("EXPERIMENT 3: PERSONALIZED MODELS FOR EACH AGE GROUP")
-    print("="*60)
     
     # Get age-split datasets (without age as feature)
     age_datasets_no_age = get_split_age_datasets(False)
@@ -439,6 +461,24 @@ if __name__ == "__main__":
         "roc_personalized_with_age.png"
     )
 
+    focus_groups = {
+        "Generic - Without Age": set(AGE_LABELS),
+        "Generic - With Age": set(AGE_LABELS),
+        "Personalized - Without Age": set(AGE_LABELS),
+    }
+
+    personalized_metrics_by_age = {metric: {} for metric in METRIC_ORDER}
+    for label, data in personalized_eval_no_age.items():
+        stats = compute_model_metrics(
+            data["model"], data["test_features"], data["test_labels"]
+        )
+        if not stats:
+            continue
+        for metric in METRIC_ORDER:
+            personalized_metrics_by_age[metric][label] = stats.get(metric)
+
+    model_metric_data["Personalized - Without Age"] = personalized_metrics_by_age
+
     decoupled_metrics = compute_decoupled_metrics(personalized_eval_no_age)
     metrics_summary["Decoupled Models - Without Age"] = decoupled_metrics
 
@@ -455,7 +495,7 @@ if __name__ == "__main__":
     plot_feature_importance_heatmap(importance_heatmap_data, "feature_importance_heatmap.png")
 
     metrics_df = pd.DataFrame(metrics_summary)
-    desired_rows = ["Test Accuracy", "Test AUC", "FN", "FP", "TP", "TN"]
+    desired_rows = ["Test Accuracy", "Test AUC", "FP", "TP", "TN"]
     metrics_df = metrics_df.reindex(desired_rows)
     print("\n" + "="*60)
     print("MODEL METRIC SUMMARY")
@@ -464,8 +504,58 @@ if __name__ == "__main__":
     metrics_df.to_csv('model_metrics_summary.csv')
     print("Metric summary saved as 'model_metrics_summary.csv'")
 
+    age_groups = AGE_LABELS
+
+    # Accuracy table
+    plot_model_metrics_by_age(
+        model_metric_data,
+        ["Test Accuracy"],
+        age_groups,
+        "model_metrics_accuracy_by_age.png",
+        focus_groups=focus_groups,
+        title="Model Accuracy by Age Group",
+    )
+
+    # AUC table
+    plot_model_metrics_by_age(
+        model_metric_data,
+        ["Test AUC"],
+        age_groups,
+        "model_metrics_auc_by_age.png",
+        focus_groups=focus_groups,
+        title="Model AUC by Age Group",
+    )
+
+    # Confusion-matrix count tables (FP, TP, TN)
+    plot_model_metrics_by_age(
+        model_metric_data,
+        ["FP"],
+        age_groups,
+        "model_metrics_fp_by_age.png",
+        focus_groups=focus_groups,
+        title="Model FP Counts by Age Group",
+    )
+
+    plot_model_metrics_by_age(
+        model_metric_data,
+        ["TP"],
+        age_groups,
+        "model_metrics_tp_by_age.png",
+        focus_groups=focus_groups,
+        title="Model TP Counts by Age Group",
+    )
+
+    plot_model_metrics_by_age(
+        model_metric_data,
+        ["TN"],
+        age_groups,
+        "model_metrics_tn_by_age.png",
+        focus_groups=focus_groups,
+        title="Model TN Counts by Age Group",
+    )
+
     # Get sample sizes for the 6 age groups (using test_age from experiment 1/2)
-    sample_sizes = get_sample_sizes_by_age_group(test_age)
+    sample_sizes = get_sample_sizes_by_age_group(test_age_with)
     print("\n" + "-"*60)
     print("Sample sizes for 6 age groups:")
     print("-"*60)
