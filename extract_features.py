@@ -36,7 +36,7 @@ def get_cleaned_train_test(include_age: bool):
 
     return train_features, train_labels, train_age, test_features, test_labels, test_age
 
-def get_split_age_datasets(include_age: bool = False):
+def get_split_age_datasets(include_age: bool):
     train_features, train_labels, train_age, test_features, test_labels, test_age = get_cleaned_train_test(include_age)
     dataset = {}
     bins = [0, 30, 40, 50, 60, float('inf')]

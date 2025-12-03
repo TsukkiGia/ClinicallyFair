@@ -9,6 +9,7 @@ np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
 from dataset_analysis import get_logreg_feature_importance
+from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison
 
 
 param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000]}
@@ -36,9 +37,77 @@ def get_best_model(train_features, train_labels):
     best_model = grid_search.best_estimator_
     return best_model
 
+def _sanitize_label(label):
+    return (label.replace("<", "lt")
+                 .replace(">", "gt")
+                 .replace("+", "plus")
+                 .replace(" ", "_")
+                 .replace("-", "_")
+                 .lower())
+
+def calculate_personalized_accuracies(age_datasets, print_results=True, return_models=False, importance_prefix=None):
+    """Train personalized models for each detailed age bin from get_split_age_datasets."""
+    personalized_accuracies = {}
+    evaluation_data = {}
+
+    age_order = ['<30', '30-39', '40-49', '50-59', '60+']
+    group_keys = [label for label in age_order if label in age_datasets]
+    group_keys.extend([label for label in age_datasets if label not in group_keys])
+
+    if print_results:
+        print("\n" + "="*60)
+        print("TRAINING PERSONALIZED MODELS FOR EACH AGE GROUP")
+        print("="*60)
+
+    for group_key in group_keys:
+        if print_results:
+            print(f"\n{group_key}:")
+            print("-" * 40)
+
+        train_features_group, train_labels_group = age_datasets[group_key]["train"]
+        test_features_group, test_labels_group = age_datasets[group_key]["test"]
+
+        train_count = len(train_features_group)
+        test_count = len(test_features_group)
+
+        if print_results:
+            print(f"  Train samples: {train_count}")
+            print(f"  Test samples: {test_count}")
+
+        if train_count == 0 or test_count == 0:
+            if print_results:
+                print(f"  Skipping {group_key} - insufficient data")
+            continue
+
+        personalized_model = get_best_model(train_features_group, train_labels_group)
+        personalized_acc = personalized_model.score(test_features_group, test_labels_group)
+        personalized_accuracies[group_key] = personalized_acc
+
+        feature_names = train_features_group.columns.tolist()
+        if importance_prefix:
+            output_path = f"{importance_prefix}_{_sanitize_label(group_key)}.png"
+            get_logreg_feature_importance(feature_names, personalized_model, output_path)
+
+        if return_models:
+            evaluation_data[group_key] = {
+                "model": personalized_model,
+                "test_features": test_features_group,
+                "test_labels": test_labels_group,
+                "feature_names": feature_names,
+                "coefficients": personalized_model.coef_[0],
+                "train_sample_size": train_count
+            }
+
+        if print_results:
+            print(f"  Personalized Model Accuracy: {personalized_acc:.4f}")
+
+    if return_models:
+        return personalized_accuracies, evaluation_data
+    return personalized_accuracies
+
 
 def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, print_results=True):
-    """Calculate and optionally display accuracy for each age bracket"""
+    """Calculate and optionally display accuracy for each age bracket for the general model"""
     # Define age brackets
     age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
     age_bins = [0, 30, 40, 50, 60, float('inf')]
@@ -80,124 +149,6 @@ def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, 
         print("="*50 + "\n")
     
     return accuracies
-
-
-def plot_accuracy_comparison(accuracies_without_age, accuracies_with_age):
-    """Plot comparison of accuracies across age groups for both models"""
-    age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
-    
-    # Extract accuracies for plotting (only for age groups that exist in both)
-    acc_without = [accuracies_without_age.get(label, None) for label in age_labels]
-    acc_with = [accuracies_with_age.get(label, None) for label in age_labels]
-    
-    # Filter out None values and corresponding labels
-    filtered_labels = []
-    filtered_without = []
-    filtered_with = []
-    
-    for i, label in enumerate(age_labels):
-        if acc_without[i] is not None and acc_with[i] is not None:
-            filtered_labels.append(label)
-            filtered_without.append(acc_without[i])
-            filtered_with.append(acc_with[i])
-    
-    # Create bar plot
-    x = np.arange(len(filtered_labels))
-    width = 0.35
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    bars1 = ax.bar(x - width/2, filtered_without, width, label='Without Age', alpha=0.8)
-    bars2 = ax.bar(x + width/2, filtered_with, width, label='With Age', alpha=0.8)
-    
-    ax.set_xlabel('Age Group', fontsize=12)
-    ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_title('Model Accuracy Across Age Groups: With vs Without Age as Feature', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(filtered_labels)
-    ax.legend()
-    ax.grid(axis='y', alpha=0.3)
-    ax.set_ylim([0, 1])
-    
-    # Add value labels on bars
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{height:.3f}',
-                   ha='center', va='bottom', fontsize=9)
-    
-    plt.tight_layout()
-    plt.savefig('accuracy_comparison_by_age.png', dpi=300, bbox_inches='tight')
-    print("Plot saved as 'accuracy_comparison_by_age.png'")
-    plt.close()
-
-
-def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
-    """Plot diverging bar chart showing accuracy changes when age is included.
-    Positive changes (improvements) go right, negative changes (decreases) go left."""
-    
-    age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
-    
-    # Calculate differences (with_age - without_age)
-    differences = []
-    valid_labels = []
-    zero_change_labels = []
-    
-    for label in age_labels:
-        if label in accuracies_without_age and label in accuracies_with_age:
-            diff = accuracies_with_age[label] - accuracies_without_age[label]
-            differences.append(diff)
-            valid_labels.append(label)
-            if np.isclose(diff, 0):
-                zero_change_labels.append(label)
-
-    if not differences:
-        print("No age groups have overlapping accuracy results to plot.")
-        return
-    
-    if zero_change_labels:
-        print("No accuracy change detected for:", ", ".join(zero_change_labels))
-    
-    # Create horizontal bar chart
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Color bars based on positive/negative (gray for zero change)
-    colors = []
-    for diff in differences:
-        if np.isclose(diff, 0):
-            colors.append('gray')
-        elif diff > 0:
-            colors.append('green')
-        else:
-            colors.append('red')
-    
-    y_positions = np.arange(len(valid_labels))
-    bars = ax.barh(y_positions, differences, color=colors, alpha=0.7, edgecolor='black')
-    
-    # Customize plot
-    ax.set_yticks(y_positions)
-    ax.set_yticklabels(valid_labels)
-    ax.set_xlabel('Change in Accuracy (With Age - Without Age)', fontsize=12)
-    ax.set_ylabel('Age Group', fontsize=12)
-    ax.set_title('Impact of Including Age on Model Accuracy by Age Group', fontsize=14, fontweight='bold')
-    ax.axvline(x=0, color='black', linewidth=1.5, linestyle='-')
-    ax.grid(axis='x', alpha=0.3)
-    
-    # Add value labels on bars
-    
-    # Legend
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='green', alpha=0.7, label='Accuracy Increases'),
-        Patch(facecolor='red', alpha=0.7, label='Accuracy Decreases')
-    ]
-    ax.legend(handles=legend_elements, loc='best')
-    
-    plt.tight_layout()
-    plt.savefig('accuracy_changes_by_age.png', dpi=300, bbox_inches='tight')
-    print("Diverging plot saved as 'accuracy_changes_by_age.png'")
-    plt.close()
-
 
 def _compute_roc_metrics(model, test_features, test_labels):
     """Compute ROC curve metrics if both classes are present."""
@@ -287,7 +238,7 @@ def _metrics_from_predictions(labels, predictions, probabilities=None):
     }
 
 
-def compute_model_metrics(model, test_features, test_labels):
+def compute_general_model_metrics(model, test_features, test_labels):
     """Compute standard metrics for a single model/test set."""
     if len(test_labels) == 0:
         return None
@@ -341,191 +292,6 @@ def get_sample_sizes_by_age_group(test_age):
     return sample_sizes
 
 
-def _sanitize_label(label):
-    return (label.replace("<", "lt")
-                 .replace(">", "gt")
-                 .replace("+", "plus")
-                 .replace(" ", "_")
-                 .replace("-", "_")
-                 .lower())
-
-
-def calculate_personalized_accuracies(age_datasets, print_results=True, return_models=False, importance_prefix=None):
-    """Train personalized models for each detailed age bin from get_split_age_datasets."""
-    personalized_accuracies = {}
-    evaluation_data = {}
-
-    age_order = ['<30', '30-39', '40-49', '50-59', '60+']
-    group_keys = [label for label in age_order if label in age_datasets]
-    group_keys.extend([label for label in age_datasets if label not in group_keys])
-
-    if print_results:
-        print("\n" + "="*60)
-        print("TRAINING PERSONALIZED MODELS FOR EACH AGE GROUP")
-        print("="*60)
-
-    for group_key in group_keys:
-        if print_results:
-            print(f"\n{group_key}:")
-            print("-" * 40)
-
-        train_features_group, train_labels_group = age_datasets[group_key]["train"]
-        test_features_group, test_labels_group = age_datasets[group_key]["test"]
-
-        train_count = len(train_features_group)
-        test_count = len(test_features_group)
-
-        if print_results:
-            print(f"  Train samples: {train_count}")
-            print(f"  Test samples: {test_count}")
-
-        if train_count == 0 or test_count == 0:
-            if print_results:
-                print(f"  Skipping {group_key} - insufficient data")
-            continue
-
-        personalized_model = get_best_model(train_features_group, train_labels_group)
-        personalized_acc = personalized_model.score(test_features_group, test_labels_group)
-        personalized_accuracies[group_key] = personalized_acc
-
-        feature_names = train_features_group.columns.tolist()
-        if importance_prefix:
-            output_path = f"{importance_prefix}_{_sanitize_label(group_key)}.png"
-            get_logreg_feature_importance(feature_names, personalized_model, output_path)
-
-        if return_models:
-            evaluation_data[group_key] = {
-                "model": personalized_model,
-                "test_features": test_features_group,
-                "test_labels": test_labels_group,
-                "feature_names": feature_names,
-                "coefficients": personalized_model.coef_[0],
-                "train_sample_size": train_count
-            }
-
-        if print_results:
-            print(f"  Personalized Model Accuracy: {personalized_acc:.4f}")
-
-    if return_models:
-        return personalized_accuracies, evaluation_data
-    return personalized_accuracies
-
-
-def plot_personalized_accuracies(personalized_accuracies):
-    """Plot bar chart showing accuracies of personalized models for each age group"""
-    if not personalized_accuracies:
-        print("No personalized accuracy data to plot.")
-        return
-
-    age_order = ['<30', '30-39', '40-49', '50-59', '60+']
-    group_keys = [label for label in age_order if label in personalized_accuracies]
-    group_keys.extend([label for label in personalized_accuracies if label not in group_keys])
-
-    age_groups = group_keys
-    accuracies = [personalized_accuracies[key] for key in group_keys]
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    x_positions = np.arange(len(age_groups))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(age_groups)))
-    bars = ax.bar(x_positions, accuracies, color=colors, 
-                   alpha=0.8, edgecolor='black', linewidth=1.5)
-
-    ax.set_xlabel('Age Group', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
-    ax.set_title('Personalized Model Accuracies by Age Group\n(Models Trained Without Age Feature)', 
-                 fontsize=14, fontweight='bold')
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(age_groups)
-    ax.set_ylim([0, 1])
-    ax.grid(axis='y', alpha=0.3, linestyle='--')
-
-    for bar, acc in zip(bars, accuracies):
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                f'{acc:.4f}',
-                ha='center', va='bottom', fontsize=11, fontweight='bold')
-
-    mean_acc = np.mean(accuracies)
-    ax.axhline(y=mean_acc, color='red', linestyle='--', linewidth=2, alpha=0.7, 
-               label=f'Mean: {mean_acc:.4f}')
-    ax.legend(loc='lower right', fontsize=10)
-
-    plt.tight_layout()
-    plt.savefig('personalized_accuracies.png', dpi=300, bbox_inches='tight')
-    print("\nPersonalized accuracies plot saved as 'personalized_accuracies.png'")
-    plt.close()
-
-
-def plot_personalized_accuracies_combined_negatives(accuracies_no_age, accuracies_with_age):
-    """Plot diverging bar chart comparing personalized models with and without age feature.
-    Shows difference on positive/negative scale."""
-
-    if not accuracies_no_age or not accuracies_with_age:
-        print("Insufficient personalized accuracy data to compare.")
-        return
-
-    age_order = ['<30', '30-39', '40-49', '50-59', '60+']
-    group_keys = [label for label in age_order if label in accuracies_no_age and label in accuracies_with_age]
-    group_keys.extend([
-        label for label in accuracies_no_age
-        if label in accuracies_with_age and label not in group_keys
-    ])
-
-    if not group_keys:
-        print("No overlapping age groups between personalized accuracy runs.")
-        return
-
-    age_groups = group_keys
-
-    differences = [accuracies_with_age[key] - accuracies_no_age[key] for key in group_keys]
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    colors = ['green' if d > 0 else 'red' if d < 0 else 'gray' for d in differences]
-
-    y_positions = np.arange(len(age_groups))
-    bars = ax.barh(y_positions, differences, color=colors, alpha=0.7, edgecolor='black', linewidth=1.5)
-
-    ax.set_yticks(y_positions)
-    ax.set_yticklabels(age_groups, fontsize=11)
-    ax.set_xlabel('Change in Accuracy (With Age - Without Age)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Age Group', fontsize=12, fontweight='bold')
-    ax.set_title('Impact of Including Age in Personalized Models\n(Positive = With Age Better, Negative = Without Age Better)', 
-                 fontsize=14, fontweight='bold')
-    ax.axvline(x=0, color='black', linewidth=2, linestyle='-')
-    ax.grid(axis='x', alpha=0.3, linestyle='--')
-
-    for i, (bar, diff) in enumerate(zip(bars, differences)):
-        width = bar.get_width()
-        label_x = width + (0.005 if width > 0 else -0.005)
-        ha = 'left' if width > 0 else 'right'
-        ax.text(label_x, bar.get_y() + bar.get_height()/2., 
-                f'{diff:+.4f}',
-                ha=ha, va='center', fontsize=11, fontweight='bold')
-
-    for i, key in enumerate(group_keys):
-        no_age_acc = accuracies_no_age.get(key, 0)
-        with_age_acc = accuracies_with_age.get(key, 0)
-        ax.text(-0.15, i, 
-                f'No Age: {no_age_acc:.3f}\nWith Age: {with_age_acc:.3f}', 
-                ha='right', va='center', fontsize=9, 
-                bbox=dict(boxstyle='round,pad=0.4', facecolor='lightblue', alpha=0.6, edgecolor='black'))
-
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='green', alpha=0.7, label='With Age Better', edgecolor='black'),
-        Patch(facecolor='red', alpha=0.7, label='Without Age Better', edgecolor='black'),
-        Patch(facecolor='gray', alpha=0.7, label='No Change', edgecolor='black')
-    ]
-    ax.legend(handles=legend_elements, loc='best', fontsize=10)
-
-    plt.tight_layout()
-    plt.savefig('personalized_with_vs_without_age.png', dpi=300, bbox_inches='tight')
-    print("\nCombined personalized plot saved as 'personalized_with_vs_without_age.png'")
-    plt.close()
-
-
 if __name__ == "__main__":
     # ==================== EXPERIMENT 1: WITHOUT AGE ====================
     print("="*60)
@@ -549,7 +315,7 @@ if __name__ == "__main__":
     accuracy_no_age = model_without_age.score(test_features_no_age, test_labels_no_age)
     print(f"Overall Test Set No Age Accuracy: {accuracy_no_age:.4f}")
 
-    gm_no_age_metrics = compute_model_metrics(model_without_age, test_features_no_age, test_labels_no_age)
+    gm_no_age_metrics = compute_general_model_metrics(model_without_age, test_features_no_age, test_labels_no_age)
     metrics_summary["Generic Model - Without Age"] = gm_no_age_metrics
 
     # Get accuracies across age groups
@@ -578,7 +344,7 @@ if __name__ == "__main__":
     accuracy_with_age = model_with_age.score(test_features_with_age, test_labels_with_age)
     print(f"Overall Test Set With Age Accuracy: {accuracy_with_age:.4f}")
 
-    gm_with_age_metrics = compute_model_metrics(model_with_age, test_features_with_age, test_labels_with_age)
+    gm_with_age_metrics = compute_general_model_metrics(model_with_age, test_features_with_age, test_labels_with_age)
     
     metrics_summary["Generic Model - With Age"] = gm_with_age_metrics
 
