@@ -150,8 +150,68 @@ def plot_accuracy_comparison(accuracies_without_age, accuracies_with_age):
                    ha='center', va='bottom', fontsize=9)
     
     plt.tight_layout()
-    plt.savefig('accuracy_comparison_by_age.png', dpi=300, bbox_inches='tight')
+    plt.savefig('general_models_accuracy_comparison_by_age.png', dpi=300, bbox_inches='tight')
     print("Plot saved as 'accuracy_comparison_by_age.png'")
+    plt.close()
+
+
+def plot_accuracy_comparison_general_personalised(general_accuracies_without_age, general_accuracies_with_age, personalized_accuracies_no_age):
+    """Plot comparison of accuracies across age groups for:
+    - General model without age
+    - General model with age  
+    - Personalized models without age
+    """
+    age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
+    
+    # Extract accuracies for plotting (only for age groups that exist in all three)
+    acc_general_without = [general_accuracies_without_age.get(label, None) for label in age_labels]
+    acc_general_with = [general_accuracies_with_age.get(label, None) for label in age_labels]
+    acc_personalized = [personalized_accuracies_no_age.get(label, None) for label in age_labels]
+    
+    # Filter out None values and corresponding labels
+    filtered_labels = []
+    filtered_general_without = []
+    filtered_general_with = []
+    filtered_personalized = []
+    
+    for i, label in enumerate(age_labels):
+        if (acc_general_without[i] is not None and 
+            acc_general_with[i] is not None and 
+            acc_personalized[i] is not None):
+            filtered_labels.append(label)
+            filtered_general_without.append(acc_general_without[i])
+            filtered_general_with.append(acc_general_with[i])
+            filtered_personalized.append(acc_personalized[i])
+    
+    # Create bar plot with 3 bars per age group
+    x = np.arange(len(filtered_labels))
+    width = 0.25
+    
+    fig, ax = plt.subplots(figsize=(14, 7))
+    bars1 = ax.bar(x - width, filtered_general_without, width, label='General - Without Age', alpha=0.8, color='#1f77b4')
+    bars2 = ax.bar(x, filtered_general_with, width, label='General - With Age', alpha=0.8, color='#ff7f0e')
+    bars3 = ax.bar(x + width, filtered_personalized, width, label='Personalized - Without Age', alpha=0.8, color='#2ca02c')
+    
+    ax.set_xlabel('Age Group', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
+    ax.set_title('Model Accuracy Comparison: General vs Personalized Models', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(filtered_labels)
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(axis='y', alpha=0.3)
+    ax.set_ylim([0, 1.2])
+    
+    # Add value labels on bars
+    for bars in [bars1, bars2, bars3]:
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{height:.3f}',
+                   ha='center', va='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig('general_vs_personalized_accuracy_comparison.png', dpi=300, bbox_inches='tight')
+    print("Plot saved as 'general_vs_personalized_accuracy_comparison.png'")
     plt.close()
 
 

@@ -9,7 +9,7 @@ np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
 from dataset_analysis import get_logreg_feature_importance, plot_feature_importance_heatmap
-from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison
+from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison, plot_accuracy_comparison_general_personalised
 
 
 param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000]}
@@ -417,6 +417,9 @@ if __name__ == "__main__":
 
     # Plot combined personalized model accuracies (diverging plot)
     plot_personalized_accuracies_combined_negatives(personalized_accuracies_no_age, personalized_accuracies_with_age)
+
+    # Plot comparison of general vs personalized models
+    plot_accuracy_comparison_general_personalised(accuracies_without_age, accuracies_with_age, personalized_accuracies_no_age)
 
     # Plot ROC curves for personalized models (without and with age)
     personalized_eval_entries_no_age = [
