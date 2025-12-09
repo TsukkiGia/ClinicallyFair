@@ -1,4 +1,5 @@
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 
 def load_and_clean_dataset(include_age: bool):
@@ -6,7 +7,14 @@ def load_and_clean_dataset(include_age: bool):
     train_df = pd.read_excel("train.xlsx")
     test_df = pd.read_excel("test.xlsx")
 
-    # Clean string columns that have ">"
+    # Rebuild train/test: combine, shuffle with fixed seed, and split 60/40.
+    full_df = pd.concat([train_df, test_df], ignore_index=True)
+    full_df = full_df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+    split_index = int(len(full_df) * 0.6)
+    train_df = full_df.iloc[:split_index].copy()
+    test_df = full_df.iloc[split_index:].copy()
+
+    # Clean string columns that have ">" in the recomputed train/test splits
     num_str_cols = ["AFP", "CA125", "CA19-9"]
     for col in num_str_cols:
         for df in (train_df, test_df):
@@ -36,7 +44,20 @@ def load_and_clean_dataset(include_age: bool):
     train_age = train_imputed["Age"]
     test_age = test_imputed["Age"]
 
-    return train_features, train_labels, train_age, test_features, test_labels, test_age
+    scaler = StandardScaler()
+    X_train_scaled = pd.DataFrame(
+        scaler.fit_transform(train_features),
+        columns=train_features.columns,
+        index=train_features.index,
+    )
+
+    X_test_scaled = pd.DataFrame(
+        scaler.transform(test_features),
+        columns=test_features.columns,
+        index=test_features.index,
+    )
+
+    return X_train_scaled, train_labels, train_age, X_test_scaled, test_labels, test_age
 
 
 def make_age_stratified_splits(include_age: bool):

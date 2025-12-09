@@ -3,9 +3,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
+import math
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score, roc_curve, auc, roc_auc_score, confusion_matrix
+from sklearn.preprocessing import StandardScaler
+
 np.random.seed(42)
 
 from extract_features import get_cleaned_train_test, get_split_age_datasets
@@ -14,7 +17,13 @@ from dataset_analysis import (
     plot_feature_importance_heatmap,
     plot_model_metrics_by_age,
 )
-from visualise_data import plot_personalized_accuracies_combined_negatives, plot_accuracies_negatives, plot_accuracy_comparison, plot_accuracy_comparison_general_personalised
+from visualise_data import (
+    plot_personalized_accuracies_combined_negatives,
+    plot_accuracies_negatives,
+    plot_accuracy_comparison,
+    plot_accuracy_comparison_general_personalised,
+    plot_decoupled_vs_general_negatives,
+)
 
 
 param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000]}
@@ -31,15 +40,9 @@ def figure_path(filename: str) -> str:
     return os.path.join(FIGURE_DIR, filename)
 
 
-def get_basic_model(train_features, train_labels):
-    """Fit a single logistic regression model with default hyperparameters."""
-    best_model = logistic_model.fit(train_features, train_labels)
-    return best_model
-
-
 def get_best_model(train_features, train_labels):
     """Run grid search to select the best-regularized logistic regression model."""
-    logistic_model = LogisticRegression(max_iter=250, C=1/10, warm_start=True)
+    logistic_model = LogisticRegression(max_iter=2500, C=1/10, warm_start=True)
     
     grid_search = GridSearchCV(
         estimator=logistic_model,
@@ -167,6 +170,120 @@ def calculate_accuracy_across_ages(model, test_features, test_labels, test_age, 
     
     return accuracies
 
+
+def _mcnemar_exact_p_value(n01, n10):
+    """Compute a two-sided exact McNemar p-value using the binomial distribution."""
+    discordant = n01 + n10
+    if discordant == 0:
+        return np.nan
+
+    k = min(n01, n10)
+    p_tail = 0.0
+    for i in range(0, k + 1):
+        p_tail += math.comb(discordant, i)
+    p_tail *= 0.5 ** discordant
+    p_value = 2.0 * p_tail
+    return min(1.0, p_value)
+
+
+def _mcnemar_from_prediction_vectors(y_true, y_pred_a, y_pred_b, alpha=0.05):
+    """Compute McNemar contingency table and stats from two prediction vectors."""
+    y_true = np.asarray(y_true)
+    y_pred_a = np.asarray(y_pred_a)
+    y_pred_b = np.asarray(y_pred_b)
+
+    correct_a = y_pred_a == y_true
+    correct_b = y_pred_b == y_true
+
+    n01 = int(np.sum(~correct_a & correct_b))  # A wrong, B correct
+    n10 = int(np.sum(correct_a & ~correct_b))  # A correct, B wrong
+    n00 = int(np.sum(~correct_a & ~correct_b))
+    n11 = int(np.sum(correct_a & correct_b))
+
+    discordant = n01 + n10
+    if discordant == 0:
+        p_value = np.nan
+        statistic = np.nan
+        significant = False
+    else:
+        p_value = _mcnemar_exact_p_value(n01, n10)
+        statistic = ((abs(n01 - n10) - 1) ** 2) / discordant
+        significant = bool(p_value < alpha)
+
+    return {
+        "n01": n01,
+        "n10": n10,
+        "n00": n00,
+        "n11": n11,
+        "discordant": discordant,
+        "statistic": statistic,
+        "p_value": p_value,
+        "significant@0.05": significant,
+    }
+
+
+def calculate_mcnemar_across_ages(
+    model_a,
+    model_b,
+    test_features_a,
+    test_features_b,
+    test_labels,
+    test_age,
+    label_a="Model A",
+    label_b="Model B",
+    print_results=True,
+):
+    """
+    Perform McNemar tests comparing two models within each age bin.
+
+    Returns a dict keyed by age label; values contain the contingency counts,
+    McNemar test statistic (with continuity correction), and p-value.
+    """
+    test_age_groups = pd.cut(test_age, bins=AGE_BINS, labels=AGE_LABELS, right=False)
+
+    if print_results:
+        print("\n" + "=" * 50)
+        print(f"McNemar Test by Age Group ({label_a} vs {label_b})")
+        print("=" * 50)
+
+    results = {}
+    for age_label in AGE_LABELS:
+        age_mask = test_age_groups == age_label
+        n_samples = age_mask.sum()
+
+        if n_samples == 0:
+            if print_results:
+                print(f"{age_label:8s}: No samples in this group")
+            continue
+
+        y_true = test_labels[age_mask]
+        y_pred_a = model_a.predict(test_features_a[age_mask])
+        y_pred_b = model_b.predict(test_features_b[age_mask])
+
+        stats = _mcnemar_from_prediction_vectors(y_true, y_pred_a, y_pred_b)
+        results[age_label] = stats
+
+        if print_results:
+            p_value = stats["p_value"]
+            if np.isnan(p_value):
+                print(
+                    f"{age_label:8s}: Models identical on all {n_samples} samples "
+                    f"(no discordant pairs), McNemar test undefined"
+                )
+            else:
+                sig_label = "YES" if stats["significant@0.05"] else "no"
+                print(
+                    f"{age_label:8s}: n01={stats['n01']:3d}, n10={stats['n10']:3d}, "
+                    f"discordant={stats['discordant']:3d}, "
+                    f"chi2={stats['statistic']:6.3f}, p={p_value:.4g}, "
+                    f"significant@0.05={sig_label}"
+                )
+
+    if print_results:
+        print("=" * 50 + "\n")
+
+    return results
+
 def _compute_roc_metrics(model, test_features, test_labels):
     """Compute ROC curve points and AUC for a model if both classes are present."""
     unique_classes = np.unique(test_labels)
@@ -254,16 +371,6 @@ def compute_metrics_by_age(model, test_features, test_labels, test_age):
     return metrics_by_age
 
 
-def build_single_group_metric_dict(stats, age_label):
-    """Create metric dict where only one age group has non-empty entries."""
-    result = {metric: {} for metric in METRIC_ORDER}
-    if not stats:
-        return result
-    for metric in METRIC_ORDER:
-        result[metric][age_label] = stats.get(metric)
-    return result
-
-
 def _metrics_from_predictions(labels, predictions, probabilities=None):
     """Return accuracy, AUC (if available), and confusion matrix counts."""
     labels = np.asarray(labels)
@@ -343,15 +450,98 @@ def get_sample_sizes_by_age_group(test_age):
     return sample_sizes
 
 
+def calculate_mcnemar_personalized_vs_generic_by_age(
+    generic_model,
+    generic_test_features,
+    generic_test_labels,
+    personalized_eval_data,
+    label_generic="Generic - Without Age",
+    label_personalized_prefix="Personalized - Without Age",
+    print_results=True,
+):
+    """
+    Perform McNemar tests comparing the generic model (without age)
+    against each personalized (decoupled) model on that age group's test patients.
+    """
+    results = {}
+
+    if print_results:
+        print("\n" + "=" * 50)
+        print(f"McNemar Test by Age Group ({label_generic} vs {label_personalized_prefix})")
+        print("=" * 50)
+
+    for age_label in AGE_LABELS:
+        data = personalized_eval_data.get(age_label)
+        if not data:
+            continue
+
+        X_personal = data["test_features"]
+        y_group = data["test_labels"]
+        if len(y_group) == 0:
+            if print_results:
+                print(f"{age_label:8s}: No samples in this group")
+            continue
+
+        idx = X_personal.index
+        # Align generic features/labels to the same patients
+        X_generic = generic_test_features.loc[idx]
+        y_true = generic_test_labels.loc[idx]
+
+        # Sanity check: labels should match between views
+        if not np.array_equal(np.asarray(y_true), np.asarray(y_group)):
+            print(f"Warning: label mismatch for age group {age_label}, skipping McNemar comparison.")
+            continue
+
+        y_pred_generic = generic_model.predict(X_generic)
+        y_pred_personal = data["model"].predict(X_personal)
+
+        stats = _mcnemar_from_prediction_vectors(y_true, y_pred_generic, y_pred_personal)
+        results[age_label] = stats
+
+        if print_results:
+            p_value = stats["p_value"]
+            if np.isnan(p_value):
+                print(
+                    f"{age_label:8s}: Models identical on all {len(y_true)} samples "
+                    f"(no discordant pairs), McNemar test undefined"
+                )
+            else:
+                sig_label = "YES" if stats["significant@0.05"] else "no"
+                print(
+                    f"{age_label:8s}: n01={stats['n01']:3d}, n10={stats['n10']:3d}, "
+                    f"discordant={stats['discordant']:3d}, "
+                    f"chi2={stats['statistic']:6.3f}, p={p_value:.4g}, "
+                    f"significant@0.05={sig_label}"
+                )
+
+    if print_results:
+        print("=" * 50 + "\n")
+
+    return results
+
+
 if __name__ == "__main__":
     # ==================== EXPERIMENT 1: WITHOUT AGE ====================
 
     metrics_summary = {}
     model_metric_data = {}
 
-    # Load data without age
-    train_features_no_age, train_labels_no_age, train_age_no, test_features_no_age, test_labels_no_age, test_age_no = get_cleaned_train_test(False)
-    
+    # Build a single canonical train/test split (with age feature),
+    # then derive the no-age version from the same split so that
+    # McNemar comparisons use exactly the same patients.
+    train_features_with_age, train_labels_with_age, train_age_with, test_features_with_age, test_labels_with_age, test_age_with = get_cleaned_train_test(True)
+
+    drop_cols = [c for c in ["Age", "Menopause"] if c in train_features_with_age.columns]
+    train_features_no_age = train_features_with_age.drop(columns=drop_cols)
+    test_features_no_age = test_features_with_age.drop(columns=drop_cols)
+
+    train_labels_no_age = train_labels_with_age
+    test_labels_no_age = test_labels_with_age
+    train_age_no = train_age_with
+    test_age_no = test_age_with
+
+    # ==================== EXPERIMENT 1: WITHOUT AGE ====================
+
     # Train model
     model_without_age = get_best_model(train_features_no_age, train_labels_no_age)
 
@@ -373,13 +563,8 @@ if __name__ == "__main__":
     model_metric_data["Generic - Without Age"] = compute_metrics_by_age(
         model_without_age, test_features_no_age, test_labels_no_age, test_age_no
     )
-    
-    
     # ==================== EXPERIMENT 2: WITH AGE ====================
-    
-    # Load data with age
-    train_features_with_age, train_labels_with_age, train_age_with, test_features_with_age, test_labels_with_age, test_age_with = get_cleaned_train_test(True)
-    
+
     # Train model
     model_with_age = get_best_model(train_features_with_age, train_labels_with_age)
     importance_df_with_age = get_logreg_feature_importance(
@@ -398,6 +583,20 @@ if __name__ == "__main__":
     )
     model_metric_data["Generic - With Age"] = compute_metrics_by_age(
         model_with_age, test_features_with_age, test_labels_with_age, test_age_with
+    )
+
+    # ==================== MCNEMAR COMPARISON (GENERAL MODELS) ====================
+
+    mcnemar_results_by_age = calculate_mcnemar_across_ages(
+        model_without_age,
+        model_with_age,
+        test_features_no_age,
+        test_features_with_age,
+        test_labels_no_age,
+        test_age_no,
+        label_a="Generic - Without Age",
+        label_b="Generic - With Age",
+        print_results=True,
     )
     
     
@@ -462,6 +661,9 @@ if __name__ == "__main__":
     # Plot comparison of general vs personalized models
     plot_accuracy_comparison_general_personalised(accuracies_without_age, accuracies_with_age, personalized_accuracies_no_age)
 
+    # Diverging plot: generic-without-age vs decoupled models by age group
+    plot_decoupled_vs_general_negatives(accuracies_without_age, personalized_accuracies_no_age)
+
     # Plot ROC curves for personalized models (without and with age)
     personalized_eval_entries_no_age = [
         {**data, "label": f"No Age - {label}"}
@@ -481,6 +683,18 @@ if __name__ == "__main__":
         personalized_eval_entries_with_age,
         "ROC Curves - Personalized Models (With Age)",
         figure_path("roc_personalized_with_age.png"),
+    )
+
+    # ==================== MCNEMAR: GENERIC VS PERSONALIZED (BY AGE) ====================
+
+    mcnemar_personalized_vs_generic = calculate_mcnemar_personalized_vs_generic_by_age(
+        model_without_age,
+        test_features_no_age,
+        test_labels_no_age,
+        personalized_eval_no_age,
+        label_generic="Generic - Without Age",
+        label_personalized_prefix="Personalized - Without Age",
+        print_results=True,
     )
 
     focus_groups = {

@@ -27,10 +27,11 @@ def plot_cancer_age_distribution():
 
     # Create age groups for better visualization
     train_data['age_group'] = pd.cut(
-        train_data['Age'], 
+        train_age, 
         bins=[0, 30, 40, 50, 60, float('inf')],
         labels=['<30', '30-39', '40-49', '50-59', '60+']
     )
+    print(train_data)
 
     # Plot distribution of age groups by cancer status
     plt.figure(figsize=(10, 6))
@@ -40,11 +41,36 @@ def plot_cancer_age_distribution():
     plt.ylabel('Count')
     plt.legend(labels=['No Cancer', 'Cancer'])
     plt.tight_layout()
-    plt.savefig(figure_path('age_distribution_by_cancer.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(figure_path('age_distribution_by_cancer_train.png'), dpi=300, bbox_inches='tight')
 
     print(f"\nDataset shape: {train_data.shape}")
     print(f"\nCancer distribution:\n{train_data['cancer'].value_counts()}")
     print(f"\nAge group distribution:\n{train_data['age_group'].value_counts().sort_index()}")
+
+def plot_cancer_age_distribution_test():
+    """Visualize cancer vs no-cancer counts across age groups in the training data."""
+    # Combine features and labels into a single DataFrame
+    print(test_labels)
+    test_data = test_features.copy()
+    test_data['cancer'] = test_labels
+    print(test_data)
+
+    # Create age groups for better visualization
+    test_data['age_group'] = pd.cut(
+        test_age, 
+        bins=[0, 30, 40, 50, 60, float('inf')],
+        labels=['<30', '30-39', '40-49', '50-59', '60+']
+    )
+
+    # Plot distribution of age groups by cancer status
+    plt.figure(figsize=(10, 6))
+    sns.countplot(x='age_group', hue='cancer', data=test_data)
+    plt.title('Distribution of Age Groups by Cancer Status')
+    plt.xlabel('Age Group')
+    plt.ylabel('Count')
+    plt.legend(labels=['No Cancer', 'Cancer'])
+    plt.tight_layout()
+    plt.savefig(figure_path('age_distribution_by_cancer_test.png'), dpi=300, bbox_inches='tight')
 
 def plot_personalized_accuracies_combined_negatives(accuracies_no_age, accuracies_with_age):
     """Plot a diverging chart of accuracy changes when age is added to personalized models."""
@@ -193,9 +219,9 @@ def plot_accuracy_comparison_general_personalised(general_accuracies_without_age
     width = 0.25
     
     fig, ax = plt.subplots(figsize=(14, 7))
-    bars1 = ax.bar(x - width, filtered_general_without, width, label='General - Without Age', alpha=0.8, color='#1f77b4')
-    bars2 = ax.bar(x, filtered_general_with, width, label='General - With Age', alpha=0.8, color='#ff7f0e')
-    bars3 = ax.bar(x + width, filtered_personalized, width, label='Personalized - Without Age', alpha=0.8, color='#2ca02c')
+    bars1 = ax.bar(x - width, filtered_general_without, width, label='Generic Model Without Age', alpha=0.8, color='#1f77b4')
+    bars2 = ax.bar(x, filtered_general_with, width, label='Personalized Model With Age', alpha=0.8, color='#ff7f0e')
+    bars3 = ax.bar(x + width, filtered_personalized, width, label='Decoupled Model', alpha=0.8, color='#2ca02c')
     
     ax.set_xlabel('Age Group', fontsize=12, fontweight='bold')
     ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
@@ -266,7 +292,7 @@ def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
     ax.set_yticklabels(valid_labels)
     ax.set_xlabel('Change in Accuracy (With Age - Without Age)', fontsize=12)
     ax.set_ylabel('Age Group', fontsize=12)
-    ax.set_title('Impact of Including Age on Model Accuracy by Age Group', fontsize=14, fontweight='bold')
+    ax.set_title('Impact of Including Age on Accuracy by Age Group', fontsize=14, fontweight='bold')
     ax.axvline(x=0, color='black', linewidth=1.5, linestyle='-')
     ax.grid(axis='x', alpha=0.3)
     
@@ -274,8 +300,8 @@ def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
     
     # Legend
     legend_elements = [
-        Patch(facecolor='green', alpha=0.7, label='Accuracy Increases'),
-        Patch(facecolor='red', alpha=0.7, label='Accuracy Decreases')
+        Patch(facecolor='green', alpha=0.7, label='Accuracy Increases (Personalized > Generic)'),
+        Patch(facecolor='red', alpha=0.7, label='Accuracy Decreases (Personalized < Generic)'),
     ]
     ax.legend(handles=legend_elements, loc='best')
     
@@ -285,5 +311,63 @@ def plot_accuracies_negatives(accuracies_without_age, accuracies_with_age):
     plt.close()
 
 
+def plot_decoupled_vs_general_negatives(general_accuracies_without_age, personalized_accuracies):
+    """Diverging plot: Personalized (decoupled) accuracy – generic-without-age accuracy by age group."""
+    age_labels = ['<30', '30-39', '40-49', '50-59', '60+']
+
+    differences = []
+    valid_labels = []
+    zero_change_labels = []
+
+    for label in age_labels:
+        if label in general_accuracies_without_age and label in personalized_accuracies:
+            diff = personalized_accuracies[label] - general_accuracies_without_age[label]
+            differences.append(diff)
+            valid_labels.append(label)
+            if np.isclose(diff, 0):
+                zero_change_labels.append(label)
+
+    if not differences:
+        print("No age groups have overlapping accuracy results to plot (generic vs decoupled).")
+        return
+
+    if zero_change_labels:
+        print("No accuracy change (generic vs decoupled) for:", ", ".join(zero_change_labels))
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    colors = []
+    for diff in differences:
+        if np.isclose(diff, 0):
+            colors.append('gray')
+        elif diff > 0:
+            colors.append('green')
+        else:
+            colors.append('red')
+
+    y_positions = np.arange(len(valid_labels))
+    bars = ax.barh(y_positions, differences, color=colors, alpha=0.7, edgecolor='black')
+
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(valid_labels)
+    ax.set_xlabel('Change in Accuracy (Decoupled - Generic Without Age)', fontsize=12)
+    ax.set_ylabel('Age Group', fontsize=12)
+    ax.set_title('Impact of Decoupled Models on Accuracy by Age Group', fontsize=14, fontweight='bold')
+    ax.axvline(x=0, color='black', linewidth=1.5, linestyle='-')
+    ax.grid(axis='x', alpha=0.3)
+
+    legend_elements = [
+        Patch(facecolor='green', alpha=0.7, label='Accuracy Increases (Decoupled > Generic)'),
+        Patch(facecolor='red', alpha=0.7, label='Accuracy Decreases (Decoupled < Generic)'),
+    ]
+    ax.legend(handles=legend_elements, loc='best')
+
+    plt.tight_layout()
+    plt.savefig(figure_path('accuracy_changes_decoupled_vs_generic_by_age.png'), dpi=300, bbox_inches='tight')
+    print("Diverging plot saved as 'figures/accuracy_changes_decoupled_vs_generic_by_age.png'")
+    plt.close()
+
+
 if __name__ == "__main__":
     plot_cancer_age_distribution()
+    plot_cancer_age_distribution_test()
